@@ -67,9 +67,11 @@ Per avviare l'ambiente di simulazione Gazebo, viene fornito un launch file ROS.
 ```bash
 roslaunch unibas_ros_line_follower gazebo_project.launch
 ```
-Per avviare l'autoguida e il riconoscimento immagini digitare in una latro terminale il comando:
+Per avviare l'autoguida e il riconoscimento immagini digitare in due terminali i comandi:
 
 ```bash
+roslaunch unibas_ros_line_follower world_project.launch 
+
 roslaunch unibas_ros_line_follower start_project.launch 
 ```
 

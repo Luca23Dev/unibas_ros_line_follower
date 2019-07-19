@@ -1,0 +1,88 @@
+#!/usr/bin/env python
+
+import rospy 
+import numpy as np
+import cv2
+from enum import Enum
+from std_msgs.msg import UInt8, Float32
+from geometry_msgs.msg import Twist
+ 
+
+class Counter(object):
+    def __init__(self):
+
+        self.sub_detection = rospy.Subscriber('/detect/logo', UInt8, self.cbDetection)
+        self.sub_vel = rospy.Subscriber('/cmd_vel', Twist, self.cbStartTimer)
+        self.pub_laps = rospy.Publisher('counter/laps', UInt8, queue_size=1)
+        self.Logos = Enum('Logos', ' unibas scottsdale_left_01 campari scottsdale_right_01  milan chess') 	
+	self.detect_counter = np.zeros(5)
+	self.current_state = self.Logos.chess.value
+        self.timer_started = False
+
+        self.laps = 0
+    
+    def cbDetection(self, uint_msg):
+        
+
+	if (uint_msg.data == self.Logos.unibas.value):
+		self.detect_counter[self.Logos.unibas.value -1] += 1		
+		if (self.current_state == self.Logos.chess.value):             
+                	rospy.loginfo('UNIBAS logo - Approvato')
+			self.current_state = self.Logos.unibas.value			
+
+        elif (uint_msg.data == self.Logos.scottsdale_left_01.value):
+               # rospy.loginfo('scottsdale_left_01 logo - Rilevato') 
+		self.detect_counter[self.Logos.scottsdale_left_01.value -1] += 1
+		if (self.current_state == self.Logos.unibas.value):
+                	rospy.loginfo('scottsdale_left_01 logo - Approvato')
+                	self.current_state = self.Logos.scottsdale_left_01.value
+
+	elif (uint_msg.data == self.Logos.campari.value): 
+ 		self.detect_counter[self.Logos.campari.value -1] += 1 
+	    	if (self.current_state == self.Logos.scottsdale_left_01.value):
+	        	rospy.loginfo('Campari logo - Approvato')
+			self.current_state = self.Logos.campari.value
+
+        elif (uint_msg.data == self.Logos.scottsdale_right_01.value):
+                #rospy.loginfo('scottsdale_right_01 logo - Rilevato') 
+		self.detect_counter[self.Logos.scottsdale_right_01.value -1] += 1
+            	if (self.current_state == self.Logos.campari.value):
+                	rospy.loginfo('scottsdale_right_01 logo - Approvato')
+                	self.current_state = self.Logos.scottsdale_right_01.value       
+        
+        elif (uint_msg.data == self.Logos.milan.value):
+                #rospy.loginfo('Milan logo - Rilevato')
+ 		self.detect_counter[self.Logos.milan.value -1] += 1
+            	if (self.current_state == self.Logos.campari.value or self.current_state == self.Logos.scottsdale_right_01.value):
+                	rospy.loginfo('Milan logo - Approvato')
+                	self.current_state = self.Logos.milan.value
+
+	elif (uint_msg.data == self.Logos.chess.value):
+                #rospy.loginfo('Chess logo - Rilevato')
+            	if (self.current_state == self.Logos.milan.value or self.current_state == self.Logos.campari.value or self.current_state == self.Logos.scottsdale_right_01.value):
+                	rospy.loginfo('Giro Finito')
+                	self.current_state = self.Logos.chess.value		 
+		                  
+		        self.laps += 1 
+			msg = 'Giro: %i' % (self.laps)
+                	rospy.loginfo(msg)			
+           		int_msg = UInt8()
+                	int_msg.data = self.laps 
+		        self.pub_laps.publish(int_msg)
+			  
+
+	
+    def cbStartTimer(self, vel_msg):
+		if not self.timer_started and vel_msg.linear.x != 0:
+			rospy.loginfo('Inizio Giro')
+			self.timer_started = True
+ 
+
+    def main(self):
+        rospy.spin()
+
+if __name__ == '__main__':
+    rospy.init_node('counter')
+    counter = Counter()
+    counter.main() 
+

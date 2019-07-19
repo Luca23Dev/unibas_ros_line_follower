@@ -1,0 +1,13 @@
+<launch> 
+
+	<include file="$(find unibas_ros_line_follower)/launch/gazebo_project.launch">
+
+		<arg name="use_gui" value="false"/>
+	</include>
+
+	<include file="$(find unibas_ros_line_follower)/launch/rviz.launch">  </include>
+
+    <node name="detect" pkg="unibas_ros_line_follower" type="detect" output="screen"></node>
+    <node name="counter" pkg="unibas_ros_line_follower" type="counter" output="screen"></node>
+
+</launch>

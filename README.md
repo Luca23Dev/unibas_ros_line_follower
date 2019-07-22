@@ -1,5 +1,5 @@
 # unibas_ros_line_follower
-Questo ros project è basto sui ROS package di ROBOTIS-GIT per il Turtlebot 3 
+Link video: https://youtu.be/uYIb7SOujMM
 
 
 ## Requisiti ##
@@ -20,7 +20,7 @@ del package
 ```bash
 cd ~/catkin_ws/src/
 ```
-
+Questo ros project è basto sui ROS package di ROBOTIS-GIT per il Turtlebot 3
 -Download di queste repository
 
 ```bash

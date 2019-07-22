@@ -1,0 +1,311 @@
+#!/usr/bin/env python
+
+
+import rospy
+import numpy as np
+import math
+import os
+import cv2
+from enum import Enum
+from std_msgs.msg import UInt8
+from sensor_msgs.msg import Image, CompressedImage
+from cv_bridge import CvBridge, CvBridgeError
+
+from rospkg import RosPack
+
+MIN_MATCH_COUNT = 8
+MIN_MSE_DECISION = 65000
+ 
+class Detect(object):
+    def __init__(self):
+        self.fnPreproc()
+        self.counter = 0
+        self.cvBridge = CvBridge()
+
+        self.pub_detected_image = rospy.Publisher('/detect/image_output', Image, queue_size = 1)
+        self.pub_image = rospy.Publisher('/detect/logo', UInt8, queue_size=1)
+        self.sub_image_original = rospy.Subscriber('/camera/rgb/image_raw', Image, self.cbFindImage, queue_size = 1)
+
+        self.Logos = Enum('Logos', 'unibas scottsdale_left_01 campari scottsdale_right_01 milan chess')
+
+    def fnPreproc(self):
+        # Inizializzazione SIFT detector
+        self.sift = cv2.xfeatures2d.SIFT_create()
+
+        dir_path = RosPack().get_path('unibas_ros_line_follower') + '/file/detect_logos/'
+        os.chdir(dir_path)
+
+        self.img_chess_flag = cv2.imread(dir_path + 'chess_flag.png',0)
+        self.img_scottsdale_left_01 = cv2.imread(dir_path + 'scottsdale_left_01.png',0)
+        self.img_campari = cv2.imread(dir_path + 'campari.png',0)
+ 
+        self.img_milan = cv2.imread(dir_path + 'milan.jpg',0)
+        self.img_scottsdale_right_01 = cv2.imread(dir_path + 'scottsdale_right_01.png',0)
+        self.img_unibas = cv2.imread(dir_path + 'unibas.png',0)
+
+        #keypoints e descrittori
+        self.kp_chess, self.des_chess = self.sift.detectAndCompute(self.img_chess_flag,None)
+        self.kp_scottsdale_left_01, self.des_scottsdale_left_01 = self.sift.detectAndCompute(self.img_scottsdale_left_01,None)
+        self.kp_campari, self.des_campari = self.sift.detectAndCompute(self.img_campari,None)
+ 
+        self.kp_milan, self.des_milan = self.sift.detectAndCompute(self.img_milan,None)
+        self.kp_scottsdale_right_01, self.des_scottsdale_right_01 = self.sift.detectAndCompute(self.img_scottsdale_right_01,None)
+        self.kp_unibas, self.des_unibas = self.sift.detectAndCompute(self.img_unibas,None)
+
+        # Impostazione dei parametri dell'algoritmo
+        FLANN_INDEX_KDTREE = 0
+        index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
+        search_params = dict(checks = 50)
+        self.flann = cv2.FlannBasedMatcher(index_params, search_params)
+
+    def fnCalcMSE(self, arr1, arr2):
+        # Calculo Mean Square Error
+        squared_diff = (arr1 - arr2) ** 2
+        sum = np.sum(squared_diff)
+        num_all = arr1.shape[0] * arr1.shape[1] #cv_image_input and 2 should have same shape
+        err = sum / num_all
+        return err
+
+    def cbFindImage(self, image_msg):
+ 
+        if self.counter % 3 != 0:
+            self.counter += 1
+            return
+        else:
+            self.counter = 1
+        
+        cv_image_input = self.cvBridge.imgmsg_to_cv2(image_msg, "bgr8")
+
+        #Trova i keypoints e i descrittori con SIFT
+        kp_input, des_input = self.sift.detectAndCompute(cv_image_input,None)
+
+        # Brute force matching
+        chess = self.detect_chess_flag(kp_input, des_input)
+        scottsdale_left_01 = self.detect_scottsdale_left_01(kp_input, des_input, cv_image_input)
+        campari = self.detect_campari(kp_input, des_input, cv_image_input)
+ 
+        milan = self.detect_milan(kp_input, des_input)
+        scottsdale_right_01 = self.detect_scottsdale_right_01(kp_input, des_input, cv_image_input)
+        unibas = self.detect_unibas(kp_input, des_input)
+ 
+        self.draw_matches(  cv_image_input, kp_input, chess, scottsdale_left_01, campari, \
+                            milan, scottsdale_right_01, unibas )
+
+    def draw_matches(self, cv_image_input, kp_input, chess, scottsdale_left_01, campari, milan, scottsdale_right_01, unibas):
+        if (chess[0] != None):
+            draw_params2 = dict(matchColor = (0,0,255),
+                                singlePointColor = None,
+                                matchesMask = chess[0],  
+                                flags = 2)
+            final2 = cv2.drawMatches(cv_image_input,kp_input,self.img_chess_flag,self.kp_scottsdale_left_01,chess[1],None,**draw_params2)
+            self.pub_detected_image.publish(self.cvBridge.cv2_to_imgmsg(final2, "bgr8"))
+        elif (scottsdale_left_01[0] != None):
+            draw_params2 = dict(matchColor = (0,0,255),
+                                singlePointColor = None,
+                                matchesMask = scottsdale_left_01[0],  
+                                flags = 2)
+            final2 = cv2.drawMatches(cv_image_input,kp_input,self.img_scottsdale_left_01,self.kp_scottsdale_left_01,scottsdale_left_01[1],None,**draw_params2)
+            self.pub_detected_image.publish(self.cvBridge.cv2_to_imgmsg(final2, "bgr8"))
+        elif (campari[0] != None):
+            draw_params2 = dict(matchColor = (0,0,255),
+                                singlePointColor = None,
+                                matchesMask = campari[0], 
+                                flags = 2)
+            final2 = cv2.drawMatches(cv_image_input,kp_input,self.img_campari,self.kp_campari,campari[1],None,**draw_params2)
+            self.pub_detected_image.publish(self.cvBridge.cv2_to_imgmsg(final2, "bgr8"))
+        elif (scottsdale_right_01[0] != None):
+            draw_params2 = dict(matchColor = (0,0,255),
+                                singlePointColor = None,
+                                matchesMask = scottsdale_right_01[0], 
+                                flags = 2)
+            final2 = cv2.drawMatches(cv_image_input,kp_input,self.img_scottsdale_right_01,self.kp_scottsdale_right_01,scottsdale_right_01[1],None,**draw_params2)
+            self.pub_detected_image.publish(self.cvBridge.cv2_to_imgmsg(final2, "bgr8"))
+       
+        elif (milan[0] != None):
+            draw_params2 = dict(matchColor = (0,0,255),
+                                singlePointColor = None,
+                                matchesMask = milan[0], 
+                                flags = 2)
+            final2 = cv2.drawMatches(cv_image_input,kp_input,self.img_milan,self.kp_milan,milan[1],None,**draw_params2)
+            self.pub_detected_image.publish(self.cvBridge.cv2_to_imgmsg(final2, "bgr8"))
+        
+        elif (unibas[0] != None):
+            draw_params2 = dict(matchColor = (0,0,255),
+                                singlePointColor = None,
+                                matchesMask = unibas[0],
+                                flags = 2)
+            final2 = cv2.drawMatches(cv_image_input,kp_input,self.img_unibas,self.kp_unibas,unibas[1],None,**draw_params2)
+            self.pub_detected_image.publish(self.cvBridge.cv2_to_imgmsg(final2, "bgr8"))
+        else:
+            self.pub_detected_image.publish(self.cvBridge.cv2_to_imgmsg(cv_image_input, "bgr8"))
+
+    def detect_chess_flag(self, kp_input, des_input):
+        matches_chess = self.flann.knnMatch(des_input,self.des_chess,k=2)
+        MIN_MATCH_COUNT = 2
+        MIN_MSE_DECISION = 35000
+        good_chess = []
+        for m,n in matches_chess:
+            if m.distance < 0.8*n.distance:
+                good_chess.append(m)
+
+        if len(good_chess)>MIN_MATCH_COUNT:
+            src_pts = np.float32([ kp_input[m.queryIdx].pt for m in good_chess ]).reshape(-1,1,2)
+            dst_pts = np.float32([ self.kp_chess[m.trainIdx].pt for m in good_chess ]).reshape(-1,1,2)
+
+            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
+            matchesMask_chess = mask.ravel().tolist()
+
+            mse = self.fnCalcMSE(src_pts, dst_pts)
+            if mse < MIN_MSE_DECISION:
+                msg_image = UInt8()
+                msg_image.data = self.Logos.chess.value
+                self.pub_image.publish(msg_image)
+        else:
+            matchesMask_chess = None
+        return (matchesMask_chess, good_chess)
+
+    def detect_unibas(self, kp_input, des_input):
+        matches_unibas = self.flann.knnMatch(des_input,self.des_unibas,k=2)
+        global MIN_MATCH_COUNT
+        global MIN_MSE_DECISION
+        good_unibas = []
+
+        for m,n in matches_unibas:
+            if m.distance < 0.7*n.distance:
+                good_unibas.append(m)
+        if len(good_unibas)>MIN_MATCH_COUNT:
+            src_pts = np.float32([ kp_input[m.queryIdx].pt for m in good_unibas ]).reshape(-1,1,2)
+            dst_pts = np.float32([ self.kp_unibas[m.trainIdx].pt for m in good_unibas ]).reshape(-1,1,2)
+
+            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
+            matchesMask_unibas = mask.ravel().tolist()
+
+            mse = self.fnCalcMSE(src_pts, dst_pts)
+            
+            if mse < MIN_MSE_DECISION:
+                msg_image = UInt8()
+                msg_image.data = self.Logos.unibas.value
+                self.pub_image.publish(msg_image)
+        else:
+            matchesMask_unibas = None
+        return (matchesMask_unibas, good_unibas)
+
+    
+    def detect_scottsdale_left_01(self, kp_input, des_input, cv_image_input):
+        matches_scottsdale_left_01 = self.flann.knnMatch(des_input,self.des_scottsdale_left_01,k=2)
+        MIN_MATCH_COUNT = 20
+	MIN_MSE_DECISION = 270000
+        good_scottsdale_left_01 = []
+
+        for m,n in matches_scottsdale_left_01:
+            if m.distance < 0.85*n.distance:
+                good_scottsdale_left_01.append(m)
+
+        if len(good_scottsdale_left_01)>MIN_MATCH_COUNT:
+            src_pts = np.float32([ kp_input[m.queryIdx].pt for m in good_scottsdale_left_01 ]).reshape(-1,1,2)
+            dst_pts = np.float32([ self.kp_scottsdale_left_01[m.trainIdx].pt for m in good_scottsdale_left_01 ]).reshape(-1,1,2)
+
+            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
+            matchesMask_scottsdale_left_01 = mask.ravel().tolist()
+
+            mse = self.fnCalcMSE(src_pts, dst_pts)
+            if mse < MIN_MSE_DECISION:
+                msg_image = UInt8()
+                msg_image.data = self.Logos.scottsdale_left_01.value
+                self.pub_image.publish(msg_image)
+        else:
+            matchesMask_scottsdale_left_01 = None
+        return (matchesMask_scottsdale_left_01, good_scottsdale_left_01)
+    
+   
+
+    def detect_scottsdale_right_01(self, kp_input, des_input, cv_image_input):
+        matches_scottsdale_right_01 = self.flann.knnMatch(des_input,self.des_scottsdale_right_01,k=2)
+        MIN_MATCH_COUNT = 20
+	MIN_MSE_DECISION = 570000
+        good_scottsdale_right_01 = []
+
+        for m,n in matches_scottsdale_right_01:
+            if m.distance < 0.75*n.distance:
+                good_scottsdale_right_01.append(m)
+        if len(good_scottsdale_right_01)>MIN_MATCH_COUNT:
+            src_pts = np.float32([ kp_input[m.queryIdx].pt for m in good_scottsdale_right_01 ]).reshape(-1,1,2)
+            dst_pts = np.float32([ self.kp_scottsdale_right_01[m.trainIdx].pt for m in good_scottsdale_right_01 ]).reshape(-1,1,2)
+
+            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
+            matchesMask_scottsdale_right_01 = mask.ravel().tolist()
+
+            mse = self.fnCalcMSE(src_pts, dst_pts)
+
+            if mse < MIN_MSE_DECISION:
+                msg_image = UInt8()
+                msg_image.data = self.Logos.scottsdale_right_01.value
+                self.pub_image.publish(msg_image)
+                
+        else:
+            matchesMask_scottsdale_right_01 = None
+        return (matchesMask_scottsdale_right_01, good_scottsdale_right_01)
+
+    
+
+    def detect_campari(self, kp_input, des_input, cv_image_input):
+        matches_campari = self.flann.knnMatch(des_input,self.des_campari,k=2)
+        global MIN_MATCH_COUNT
+        global MIN_MSE_DECISION
+        good_campari = []
+
+        for m,n in matches_campari:
+            if m.distance < 0.5*n.distance:
+                good_campari.append(m)
+        if len(good_campari)>MIN_MATCH_COUNT:
+            src_pts = np.float32([ kp_input[m.queryIdx].pt for m in good_campari ]).reshape(-1,1,2)
+            dst_pts = np.float32([ self.kp_campari[m.trainIdx].pt for m in good_campari ]).reshape(-1,1,2)
+
+            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
+            matchesMask_campari = mask.ravel().tolist()
+
+            mse = self.fnCalcMSE(src_pts, dst_pts)
+            
+            if mse < MIN_MSE_DECISION:
+                msg_image = UInt8()
+                msg_image.data = self.Logos.campari.value
+                self.pub_image.publish(msg_image)
+        else:
+            matchesMask_campari = None
+        return (matchesMask_campari, good_campari)
+
+    def detect_milan(self, kp_input, des_input):
+        matches_milan = self.flann.knnMatch(des_input,self.des_milan,k=2)
+        global MIN_MATCH_COUNT
+        global MIN_MSE_DECISION
+        good_milan = []
+
+        for m,n in matches_milan:
+            if m.distance < 0.5*n.distance:
+                good_milan.append(m)
+        if len(good_milan)>MIN_MATCH_COUNT:
+            src_pts = np.float32([ kp_input[m.queryIdx].pt for m in good_milan ]).reshape(-1,1,2)
+            dst_pts = np.float32([ self.kp_milan[m.trainIdx].pt for m in good_milan ]).reshape(-1,1,2)
+
+            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
+            matchesMask_milan = mask.ravel().tolist()
+
+            mse = self.fnCalcMSE(src_pts, dst_pts)
+            
+            if mse < MIN_MSE_DECISION:
+                msg_image = UInt8()
+                msg_image.data = self.Logos.milan.value
+                self.pub_image.publish(msg_image)
+        else:
+            matchesMask_milan = None
+        return (matchesMask_milan, good_milan)
+
+    def main(self):
+        rospy.spin()
+
+
+if __name__ == '__main__':
+    rospy.init_node('detect')
+    node = Detect()
+    node.main()
+
